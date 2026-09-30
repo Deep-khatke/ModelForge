@@ -1,0 +1,5 @@
+server = "http://172.18.0.3:5000"
+
+[host."http://172.18.0.3:5000"]
+  capabilities = ["pull", "resolve"]
+  skip_verify = true

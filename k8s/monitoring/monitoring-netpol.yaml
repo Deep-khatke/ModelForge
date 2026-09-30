@@ -1,0 +1,205 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prometheus-netpol
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: prometheus
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: modelforge
+      app.kubernetes.io/component: prometheus
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow incoming queries from Grafana or local port-forwarding on port 9090
+    - ports:
+        - protocol: TCP
+          port: 9090
+  egress:
+    # 1. Allow scraping backend metrics on port 8000
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: modelforge
+              app.kubernetes.io/component: backend
+      ports:
+        - protocol: TCP
+          port: 8000
+    # 2. Allow scraping model-server metrics on port 8000
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: modelforge
+              app.kubernetes.io/component: model-server
+      ports:
+        - protocol: TCP
+          port: 8000
+    # 3. Allow scraping kube-state-metrics on port 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kube-state-metrics
+      ports:
+        - protocol: TCP
+          port: 8080
+    # 4. Allow CoreDNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 5. Allow scraping cAdvisor via Kubernetes API Server
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+        - protocol: TCP
+          port: 10250
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: grafana-netpol
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: grafana
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: modelforge
+      app.kubernetes.io/component: grafana
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow web dashboard access on port 3000
+    - ports:
+        - protocol: TCP
+          port: 3000
+  egress:
+    # 1. Allow querying Prometheus on port 9090
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: modelforge
+              app.kubernetes.io/component: prometheus
+      ports:
+        - protocol: TCP
+          port: 9090
+    # 2. Allow querying Loki on port 3100
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: modelforge
+              app.kubernetes.io/component: loki
+      ports:
+        - protocol: TCP
+          port: 3100
+    # 3. Allow CoreDNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: loki-netpol
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: loki
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: modelforge
+      app.kubernetes.io/component: loki
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow ingesting logs from Promtail and queries from Grafana on port 3100
+    - ports:
+        - protocol: TCP
+          port: 3100
+  egress:
+    # Allow CoreDNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kube-state-metrics-netpol
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: kube-state-metrics
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kube-state-metrics
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow scraping on port 8080 from Prometheus
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: modelforge
+              app.kubernetes.io/component: prometheus
+      ports:
+        - protocol: TCP
+          port: 8080
+    - ports:
+        - protocol: TCP
+          port: 8081
+  egress:
+    # Allow CoreDNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow Kubernetes API communication
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443

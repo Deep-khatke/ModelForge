@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: modelforge-config
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: config
+data:
+  DATABASE_BACKEND: "firestore"
+  DATABASE_URL: "sqlite:////app/storage/models/modelforge.db"
+  FIREBASE_PROJECT_ID: "modelforge-d8cd0"
+  FIREBASE_AUTH_ENABLED: "true"
+  GOOGLE_APPLICATION_CREDENTIALS: "/etc/modelforge/credentials/firebase-credentials.json"
+  MODEL_STORAGE_DIR: "/app/storage/models"
+  MAX_UPLOAD_SIZE_MB: "50"
+  ALLOWED_MODEL_EXTENSIONS: ".joblib"
+  CORS_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173,http://localhost,http://127.0.0.1,http://172.18.0.2,http://modelforge.local"
+  API_TITLE: "ModelForge API"
+  API_VERSION: "1.5.0"
+  MAX_REPLICAS: "5"
+  DEFAULT_REPLICAS: "1"
+  ALERT_LATENCY_THRESHOLD_MS: "500.0"
+  ALERT_ERROR_RATE_THRESHOLD_PERCENT: "5.0"
+  MONITORING_RETENTION_DAYS: "30"
+  MODEL_SERVER_URL: "http://model-server.modelforge.svc.cluster.local:8000"
+  MODEL_STORAGE_BACKEND: "minio"
+  MINIO_ENDPOINT: "http://minio.modelforge.svc.cluster.local:9000"
+  MINIO_BUCKET: "modelforge-models"

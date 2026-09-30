@@ -1,0 +1,14 @@
+# ModelForge Phase 15 — Example Variables
+# Copy to terraform.tfvars or pass via CLI (-var-file)
+
+kubeconfig_path    = "~/.kube/config"
+kube_context       = "docker-desktop"
+namespace          = "modelforge"
+environment        = "local"
+api_version        = "1.5.0"
+storage_class_name = "standard"
+
+# Storage Allocation
+model_storage_pvc_size = "1Gi"
+minio_pvc_size         = "1Gi"
+registry_pvc_size      = "2Gi"

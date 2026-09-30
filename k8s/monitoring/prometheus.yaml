@@ -1,0 +1,283 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: modelforge-prometheus
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: prometheus
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: modelforge-prometheus
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: prometheus
+rules:
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - nodes/proxy
+      - nodes/metrics
+      - services
+      - endpoints
+      - pods
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["extensions", "networking.k8s.io"]
+    resources:
+      - ingresses
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics", "/api/v1/nodes/*/proxy/metrics/cadvisor"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: modelforge-prometheus
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: modelforge-prometheus
+subjects:
+  - kind: ServiceAccount
+    name: modelforge-prometheus
+    namespace: modelforge
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: prometheus
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 5s
+      scrape_timeout: 4s
+      evaluation_interval: 5s
+
+    rule_files:
+      - /etc/prometheus/alert_rules.yml
+
+    scrape_configs:
+      - job_name: "modelforge-backend"
+        metrics_path: "/metrics"
+        static_configs:
+          - targets: ["modelforge-backend.modelforge.svc.cluster.local:8000"]
+        relabel_configs:
+          - target_label: app
+            replacement: modelforge-backend
+
+      - job_name: "model-server"
+        metrics_path: "/metrics"
+        static_configs:
+          - targets: ["model-server.modelforge.svc.cluster.local:8000"]
+        relabel_configs:
+          - target_label: app
+            replacement: model-server
+
+      - job_name: "kube-state-metrics"
+        static_configs:
+          - targets: ["kube-state-metrics.modelforge.svc.cluster.local:8080"]
+
+      - job_name: "kubernetes-cadvisor"
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            regex: (.+)
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+
+      - job_name: "prometheus"
+        static_configs:
+          - targets: ["localhost:9090"]
+
+  alert_rules.yml: |
+    groups:
+      - name: modelforge_alerts
+        rules:
+          - alert: HighHttpErrorRate
+            expr: sum(rate(modelforge_http_errors_total[1m])) > 0
+            for: 5s
+            labels:
+              severity: warning
+            annotations:
+              summary: "High HTTP error rate detected on ModelForge backend"
+              description: "Backend is returning HTTP 4xx or 5xx responses at rate > 0/s."
+
+          - alert: HighInferenceLatency
+            expr: histogram_quantile(0.95, sum(rate(modelforge_inference_latency_seconds_bucket[1m])) by (le)) > 1.0
+            for: 5s
+            labels:
+              severity: warning
+            annotations:
+              summary: "High inference latency detected"
+              description: "P95 inference latency has exceeded 1.0 second threshold."
+
+          - alert: InferenceErrorRateHigh
+            expr: sum(rate(modelforge_inference_errors_total[1m])) > 0
+            for: 5s
+            labels:
+              severity: warning
+            annotations:
+              summary: "Model inference errors occurring"
+              description: "Model prediction requests are failing or resulting in errors."
+
+          - alert: BackendUnavailable
+            expr: up{job="modelforge-backend"} == 0
+            for: 10s
+            labels:
+              severity: critical
+            annotations:
+              summary: "ModelForge backend unreachable"
+              description: "Prometheus cannot scrape /metrics on modelforge-backend."
+
+          - alert: ModelServerUnavailable
+            expr: up{job="model-server"} == 0
+            for: 10s
+            labels:
+              severity: critical
+            annotations:
+              summary: "Model-server microservice unreachable"
+              description: "Prometheus cannot scrape /metrics on model-server."
+
+          - alert: PodCrashRestart
+            expr: sum(increase(kube_pod_container_status_restarts_total{namespace="modelforge"}[5m])) > 0
+            for: 30s
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod restart detected in modelforge namespace"
+              description: "One or more containers in modelforge have restarted."
+
+          - alert: HpaMaxReplicasReached
+            expr: kube_horizontalpodautoscaler_status_current_replicas{namespace="modelforge"} >= kube_horizontalpodautoscaler_spec_max_replicas{namespace="modelforge"}
+            for: 1m
+            labels:
+              severity: warning
+            annotations:
+              summary: "HPA reached max allowed replicas"
+              description: "model-server-hpa has scaled to its maximum capacity limit."
+
+          - alert: HighCpuUsage
+            expr: sum(rate(container_cpu_usage_seconds_total{namespace="modelforge"}[1m])) > 0.8
+            for: 1m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High container CPU utilization"
+              description: "Pod CPU utilization exceeds 80% threshold."
+
+          - alert: HighMemoryUsage
+            expr: sum(container_memory_working_set_bytes{namespace="modelforge"}) > 3000000000
+            for: 1m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High container memory consumption"
+              description: "Container working set memory consumption exceeds threshold."
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: modelforge
+      app.kubernetes.io/component: prometheus
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: modelforge
+        app.kubernetes.io/component: prometheus
+    spec:
+      serviceAccountName: modelforge-prometheus
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.51.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--storage.tsdb.retention.time=24h"
+            - "--web.enable-lifecycle"
+          ports:
+            - name: http
+              containerPort: 9090
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/prometheus
+            - name: storage-volume
+              mountPath: /prometheus
+      volumes:
+        - name: config-volume
+          configMap:
+            name: prometheus-config
+        - name: storage-volume
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: prometheus
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+      protocol: TCP

@@ -1,0 +1,239 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: model-server-netpol
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: model-server
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: modelforge
+      app.kubernetes.io/component: model-server
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow incoming traffic from backend pods and Prometheus monitoring on port 8000
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: modelforge
+              app.kubernetes.io/component: backend
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: modelforge
+              app.kubernetes.io/component: prometheus
+      ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+    # Allow CoreDNS lookups if needed
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-netpol
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: backend
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: modelforge
+      app.kubernetes.io/component: backend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow incoming API traffic from frontend pods and external entrypoints on port 8000
+    - ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+    # 1. Allow egress to model-server pods
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: modelforge
+              app.kubernetes.io/component: model-server
+      ports:
+        - protocol: TCP
+          port: 8000
+    # 2. Allow CoreDNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 3. Allow secure HTTPS outbound egress to Firebase / Google Cloud Firestore (port 443)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+    # 4. Allow egress to MinIO object storage on ports 9000 & 9001
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: modelforge
+              app.kubernetes.io/component: minio
+      ports:
+        - protocol: TCP
+          port: 9000
+        - protocol: TCP
+          port: 9001
+    # 5. Allow egress to local container registry on port 5000
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: modelforge
+              app.kubernetes.io/component: registry
+      ports:
+        - protocol: TCP
+          port: 5000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-netpol
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: frontend
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: modelforge
+      app.kubernetes.io/component: frontend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow public browser access to frontend Nginx on HTTP ports
+    - ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 5173
+  egress:
+    # 1. Allow Nginx reverse proxy to backend pods on port 8000
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: modelforge
+              app.kubernetes.io/component: backend
+      ports:
+        - protocol: TCP
+          port: 8000
+    # 2. Allow CoreDNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: minio-netpol
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: minio
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: modelforge
+      app.kubernetes.io/component: minio
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # 1. Allow S3 API traffic from backend pods on port 9000
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: modelforge
+              app.kubernetes.io/component: backend
+      ports:
+        - protocol: TCP
+          port: 9000
+    # 2. Allow S3 API and Web Console from external access / LoadBalancer
+    - ports:
+        - protocol: TCP
+          port: 9000
+        - protocol: TCP
+          port: 9001
+  egress:
+    # Allow CoreDNS lookups
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: registry-netpol
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: registry
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: modelforge
+      app.kubernetes.io/component: registry
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow container registry API on port 5000
+    - ports:
+        - protocol: TCP
+          port: 5000
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

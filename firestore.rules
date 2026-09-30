@@ -1,0 +1,91 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: is user authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper: is user accessing their own user document
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Helper: check user profile data
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'ADMIN' ||
+        getUserData().role == 'ADMIN'
+      );
+    }
+
+    function isOperatorOrAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role in ['ADMIN', 'OPERATOR'] ||
+        getUserData().role in ['ADMIN', 'OPERATOR']
+      );
+    }
+
+    // 1. Users collection
+    match /users/{userId} {
+      // Users can read their own profile; Admins can read all profiles
+      allow read: if isOwner(userId) || isAdmin();
+      // Admins can update roles / status; Users can update display_name on their own profile
+      allow create: if isAuthenticated();
+      allow update: if isAdmin() || (
+        isOwner(userId) && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'is_active']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    // 2. Models & Model Versions
+    match /models/{modelId} {
+      // All authenticated users (VIEWER, OPERATOR, ADMIN) can read model catalog
+      allow read: if isAuthenticated();
+      // Only OPERATOR and ADMIN can create, update, or delete models
+      allow create, update, delete: if isOperatorOrAdmin();
+
+      match /versions/{versionId} {
+        allow read: if isAuthenticated();
+        allow create, update, delete: if isOperatorOrAdmin();
+      }
+    }
+
+    // 3. Deployments & Subcollections
+    match /deployments/{deploymentId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isOperatorOrAdmin();
+
+      match /replicas/{replicaId} {
+        allow read: if isAuthenticated();
+        allow write: if isOperatorOrAdmin();
+      }
+
+      match /autoscaling_config/{configDoc} {
+        allow read: if isAuthenticated();
+        allow write: if isOperatorOrAdmin();
+      }
+    }
+
+    // 4. Audit Events (Immutable compliance trail)
+    match /audit_events/{eventId} {
+      // Only Admins can view audit logs
+      allow read: if isAdmin();
+      // Client writes are prohibited to prevent tampering;
+      // Backend Admin SDK writes bypass rules directly.
+      allow write: if false;
+    }
+
+    // 5. Experiments
+    match /experiments/{experimentId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isOperatorOrAdmin();
+      allow delete: if isAdmin();
+    }
+  }
+}

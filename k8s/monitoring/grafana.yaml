@@ -1,0 +1,372 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-admin-secret
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: grafana
+type: Opaque
+stringData:
+  admin-user: "admin"
+  admin-password: "ModelForgeLocalMonitoring2026!"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: grafana
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus.modelforge.svc.cluster.local:9090
+        isDefault: true
+        editable: false
+        jsonData:
+          timeInterval: 5s
+      - name: Loki
+        type: loki
+        access: proxy
+        url: http://loki.modelforge.svc.cluster.local:3100
+        editable: false
+        jsonData:
+          maxLines: 1000
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-provider
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: grafana
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: "ModelForge"
+        orgId: 1
+        folder: "ModelForge"
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 10
+        allowUiUpdates: true
+        options:
+          path: /etc/grafana/provisioning/dashboards/json
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-json
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: grafana
+data:
+  modelforge-overview.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "title": "Total HTTP Requests",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+          "targets": [{"expr": "sum(modelforge_http_requests_total)", "refId": "A"}],
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}}
+        },
+        {
+          "title": "HTTP Request Rate (req/s)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 10, "x": 4, "y": 0},
+          "targets": [{"expr": "sum(rate(modelforge_http_requests_total[1m])) by (method, status)", "legendFormat": "{{method}} {{status}}", "refId": "A"}]
+        },
+        {
+          "title": "HTTP Error Rate",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 10, "x": 14, "y": 0},
+          "targets": [{"expr": "sum(rate(modelforge_http_errors_total[1m])) by (status)", "legendFormat": "Error {{status}}", "refId": "A"}]
+        },
+        {
+          "title": "P95 & P99 Latency (seconds)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "targets": [
+            {"expr": "histogram_quantile(0.95, sum(rate(modelforge_http_request_duration_seconds_bucket[1m])) by (le))", "legendFormat": "P95", "refId": "A"},
+            {"expr": "histogram_quantile(0.99, sum(rate(modelforge_http_request_duration_seconds_bucket[1m])) by (le))", "legendFormat": "P99", "refId": "B"}
+          ]
+        },
+        {
+          "title": "Active Model Replicas & HPA Desired",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "targets": [
+            {"expr": "kube_deployment_status_replicas_available{deployment=\"model-server\",namespace=\"modelforge\"}", "legendFormat": "Active Replicas", "refId": "A"},
+            {"expr": "kube_horizontalpodautoscaler_status_desired_replicas{horizontalpodautoscaler=\"model-server-hpa\",namespace=\"modelforge\"}", "legendFormat": "HPA Desired", "refId": "B"},
+            {"expr": "kube_horizontalpodautoscaler_status_current_replicas{horizontalpodautoscaler=\"model-server-hpa\",namespace=\"modelforge\"}", "legendFormat": "HPA Current", "refId": "C"}
+          ]
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["modelforge", "overview"],
+      "time": {"from": "now-1h", "to": "now"},
+      "title": "Dashboard 1 - ModelForge Overview",
+      "uid": "modelforge-overview"
+    }
+
+  kubernetes.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 1,
+      "id": null,
+      "panels": [
+        {
+          "title": "Pod CPU Usage (cores)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "targets": [{"expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"modelforge\",container!=\"\"}[1m])) by (pod)", "legendFormat": "{{pod}}", "refId": "A"}]
+        },
+        {
+          "title": "Pod Memory Working Set (bytes)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "targets": [{"expr": "sum(container_memory_working_set_bytes{namespace=\"modelforge\",container!=\"\"}) by (pod)", "legendFormat": "{{pod}}", "refId": "A"}]
+        },
+        {
+          "title": "Pod Container Restarts",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8},
+          "targets": [{"expr": "sum(kube_pod_container_status_restarts_total{namespace=\"modelforge\"}) by (pod)", "legendFormat": "{{pod}}", "refId": "A"}]
+        },
+        {
+          "title": "Ready Replicas per Deployment",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8},
+          "targets": [{"expr": "kube_deployment_status_replicas_available{namespace=\"modelforge\"}", "legendFormat": "{{deployment}}", "refId": "A"}]
+        },
+        {
+          "title": "HPA Autoscaling State",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8},
+          "targets": [
+            {"expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"modelforge\"}", "legendFormat": "Current", "refId": "A"},
+            {"expr": "kube_horizontalpodautoscaler_status_desired_replicas{namespace=\"modelforge\"}", "legendFormat": "Desired", "refId": "B"}
+          ]
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["modelforge", "kubernetes"],
+      "time": {"from": "now-1h", "to": "now"},
+      "title": "Dashboard 2 - Kubernetes Infrastructure",
+      "uid": "modelforge-kubernetes"
+    }
+
+  ml-inference.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 1,
+      "id": null,
+      "panels": [
+        {
+          "title": "Inference Throughput (req/s)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "targets": [{"expr": "sum(rate(modelforge_inference_requests_total[1m])) by (model, status)", "legendFormat": "{{model}} ({{status}})", "refId": "A"}]
+        },
+        {
+          "title": "Inference Latency Percentiles (seconds)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "targets": [
+            {"expr": "histogram_quantile(0.50, sum(rate(modelforge_inference_latency_seconds_bucket[1m])) by (le))", "legendFormat": "P50", "refId": "A"},
+            {"expr": "histogram_quantile(0.95, sum(rate(modelforge_inference_latency_seconds_bucket[1m])) by (le))", "legendFormat": "P95", "refId": "B"},
+            {"expr": "histogram_quantile(0.99, sum(rate(modelforge_inference_latency_seconds_bucket[1m])) by (le))", "legendFormat": "P99", "refId": "C"}
+          ]
+        },
+        {
+          "title": "Inference Errors",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8},
+          "targets": [{"expr": "sum(rate(modelforge_inference_errors_total[1m])) by (error_type)", "legendFormat": "{{error_type}}", "refId": "A"}]
+        },
+        {
+          "title": "Model Loading Status (1=Loaded, 0=Unavailable)",
+          "type": "stat",
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8},
+          "targets": [{"expr": "modelforge_model_server_loaded_status", "legendFormat": "Model Loaded", "refId": "A"}],
+          "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"]}}
+        },
+        {
+          "title": "Active Inference Requests",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8},
+          "targets": [{"expr": "sum(modelforge_model_server_active_requests) by (model)", "legendFormat": "Active {{model}}", "refId": "A"}]
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["modelforge", "inference"],
+      "time": {"from": "now-1h", "to": "now"},
+      "title": "Dashboard 3 - ML Inference",
+      "uid": "modelforge-ml-inference"
+    }
+
+  security-operations.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 1,
+      "id": null,
+      "panels": [
+        {
+          "title": "Authentication Failures",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "targets": [{"expr": "sum(rate(modelforge_auth_failures_total[1m])) by (reason)", "legendFormat": "{{reason}}", "refId": "A"}]
+        },
+        {
+          "title": "Deployment Failures",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "targets": [{"expr": "sum(rate(modelforge_deployment_failures_total[1m])) by (model)", "legendFormat": "{{model}}", "refId": "A"}]
+        },
+        {
+          "title": "Storage Operations (MinIO/S3)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "targets": [{"expr": "sum(rate(modelforge_storage_operations_total[1m])) by (operation, status)", "legendFormat": "{{operation}} ({{status}})", "refId": "A"}]
+        },
+        {
+          "title": "Centralized Application & Security Logs (Loki)",
+          "type": "logs",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "targets": [{"datasource": {"type": "loki", "uid": "Loki"}, "expr": "{namespace=\"modelforge\"}", "refId": "A"}]
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["modelforge", "security"],
+      "time": {"from": "now-1h", "to": "now"},
+      "title": "Dashboard 4 - Security & Operational Events",
+      "uid": "modelforge-security-operations"
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: modelforge
+      app.kubernetes.io/component: grafana
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: modelforge
+        app.kubernetes.io/component: grafana
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+      containers:
+        - name: grafana
+          image: grafana/grafana:10.4.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin-secret
+                  key: admin-user
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin-secret
+                  key: admin-password
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards-json
+              mountPath: /etc/grafana/provisioning/dashboards/json
+            - name: storage
+              mountPath: /var/lib/grafana
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: dashboard-provider
+          configMap:
+            name: grafana-dashboards-provider
+        - name: dashboards-json
+          configMap:
+            name: grafana-dashboards-json
+        - name: storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: grafana
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      protocol: TCP

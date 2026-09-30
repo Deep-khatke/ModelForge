@@ -1,0 +1,54 @@
+# Backend
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.venv/
+backend/venv/
+backend/.env
+backend/.env.*
+!backend/.env.example
+*.db
+backend/*.db
+backend/storage/models/*
+!backend/storage/models/.gitkeep
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Terraform / OpenTofu IaC
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform/
+.terraform.lock.hcl
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/*.tfplan
+infra/terraform/.terraform.lock.hcl
+!infra/terraform/terraform.tfvars.example
+
+# Firebase & Cloud Credentials
+*service-account*.json
+*firebase-adminsdk*.json
+*credentials*.json
+*.credential.json
+firebase-debug.log
+firestore-debug.log
+.firebase/
+
+# Kubernetes Secrets
+k8s/secrets.yaml
+!k8s/secrets.example.yaml
+k8s/minio-secrets.yaml
+!k8s/minio-secrets.example.yaml
+
+# Logs & Temporary Files
+*.log
+*.tmp

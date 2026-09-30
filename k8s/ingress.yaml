@@ -1,0 +1,52 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: modelforge-ingress
+  namespace: modelforge
+  labels:
+    app.kubernetes.io/name: modelforge
+    app.kubernetes.io/component: ingress
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+spec:
+  # In production cloud environments, specify the ingress controller class:
+  # ingressClassName: nginx   # For ingress-nginx / community ingress
+  # ingressClassName: gce     # For GKE Cloud Load Balancer (Google Cloud)
+  rules:
+    - host: modelforge.local
+      http:
+        paths:
+          # Frontend SPA dashboard route (serves UI assets)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: modelforge-frontend
+                port:
+                  number: 80
+          # Backend REST API route (serves endpoints, OpenAPI docs, and auth)
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+    # Direct access rule (for IP-based or cluster routing)
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: modelforge-frontend
+                port:
+                  number: 80
