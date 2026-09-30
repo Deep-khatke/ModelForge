@@ -176,18 +176,12 @@ resource "kubernetes_role" "backend_role" {
   rule {
     api_groups = ["apps"]
     resources  = ["deployments"]
-    verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
+    verbs      = ["get", "list", "watch", "create", "update", "patch"]
   }
 
   rule {
     api_groups = [""]
-    resources  = ["services"]
-    verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
-  }
-
-  rule {
-    api_groups = [""]
-    resources  = ["pods", "configmaps"]
+    resources  = ["pods", "services"]
     verbs      = ["get", "list", "watch"]
   }
 

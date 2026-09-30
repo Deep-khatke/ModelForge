@@ -9,6 +9,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $WorkspaceRoot = (Get-Item $PSScriptRoot).Parent.FullName
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User") + ";$env:LOCALAPPDATA\Microsoft\WinGet\Packages\OpenTofu.Tofu_Microsoft.Winget.Source_8wekyb3d8bbwe"
 
 Write-Host "================================================================================" -ForegroundColor Cyan
 Write-Host " MODELFORGE CONTINUOUS DEPLOYMENT (CD) PIPELINE" -ForegroundColor Cyan
@@ -44,7 +45,7 @@ if ($DryRun) {
     $manifestFiles = Get-ChildItem "$WorkspaceRoot\k8s" -Filter "*.yaml" -File | Where-Object { $_.Name -notmatch "example" }
     foreach ($m in $manifestFiles) {
         Write-Host "   Validating $($m.Name)..." -ForegroundColor Gray
-        & kubectl apply -f $m.FullName --dry-run=client -n $Namespace
+        & kubectl apply -f $m.FullName --dry-run=client
         if ($LASTEXITCODE -ne 0) { throw "Manifest dry-run failed on $($m.Name)" }
     }
     Write-Host "[OK] All Kubernetes manifests passed client-side dry-run validation." -ForegroundColor Green
@@ -120,9 +121,18 @@ Write-Host "[OK] All deployments completed rolling update successfully." -Foregr
 # 7. Deployment Health Gate Verification
 Write-Host "`n[+] 5. Verifying Deployment Health Gates..." -ForegroundColor Cyan
 
-# Gate A: Pods Ready
-$notReady = (kubectl get pods -n $Namespace --no-headers | Where-Object { $_ -notmatch "Running\s+[0-9]+/[0-9]+" -and $_ -notmatch "Completed" })
-if ($notReady) {
+# Gate A: Pods Ready (Wait up to 30s if any pod is transitioning to Ready)
+$deadline = (Get-Date).AddSeconds(30)
+$allReady = $false
+while ((Get-Date) -lt $deadline) {
+    $notReady = (kubectl get pods -n $Namespace --no-headers | Where-Object { $_ -notmatch "\s+[1-9][0-9]*/[1-9][0-9]*\s+Running" -and $_ -notmatch "Completed" })
+    if (-not $notReady) {
+        $allReady = $true
+        break
+    }
+    Start-Sleep -Seconds 2
+}
+if (-not $allReady) {
     throw "Health Gate Failed: Some pods are not in Ready/Running state: $notReady"
 }
 Write-Host "   [Gate 1/5: Pod Readiness] PASS" -ForegroundColor Green
@@ -150,8 +160,7 @@ if ($frontendStatus -ne "200") {
 }
 
 # Gate E: Live Inference Pipeline Test
-$testPayload = '{"features": [[1.0, 2.0]]}'
-$predResult = & kubectl exec -n $Namespace deploy/modelforge-backend -- python -c "import urllib.request, json; req = urllib.request.Request('http://model-server:8000/predict', data=b'$testPayload', headers={'Content-Type': 'application/json'}); print(json.loads(urllib.request.urlopen(req, timeout=5).read().decode()).get('predictions', []))" 2>$null
+$predResult = & kubectl exec -n $Namespace deploy/modelforge-backend -- python -c "import urllib.request, json; data = json.dumps({'features': [1.0, 2.0]}).encode(); req = urllib.request.Request('http://model-server:8000/predict', data=data, headers={'Content-Type': 'application/json'}); print(json.loads(urllib.request.urlopen(req, timeout=5).read().decode()).get('predictions', []))" 2>$null
 if ($predResult -notmatch "\[[0-9]+\]") {
     throw "Health Gate Failed: Live model inference test failed: $predResult"
 }

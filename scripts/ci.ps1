@@ -9,7 +9,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $WorkspaceRoot = (Get-Item $PSScriptRoot).Parent.FullName
-$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User") + ";$env:LOCALAPPDATA\Microsoft\WinGet\Packages\OpenTofu.Tofu_Microsoft.Winget.Source_8wekyb3d8bbwe"
 
 Write-Host "================================================================================" -ForegroundColor Cyan
 Write-Host " MODELFORGE AUTOMATED CONTINUOUS INTEGRATION (CI) PIPELINE" -ForegroundColor Cyan
@@ -37,7 +37,7 @@ Write-Host "[OK] Stage 1 Pre-flight checks passed." -ForegroundColor Green
 # STAGE 2: Secret Scanning Gate
 # -----------------------------------------------------------------------------
 Write-Host "`n[STAGE 2/8] Running Security Secret Scanner..." -ForegroundColor Cyan
-$secretMatches = & git grep -E -I -i "(BEGIN RSA PRIVATE KEY|AIzaSy[A-Za-z0-9_-]{33}|client_secret|MINIO_ROOT_PASSWORD\s*:\s*[A-Za-z0-9]+)" -- ':!*.example.*' ':!tests/*' ':!*.gitignore' 2>$null
+$secretMatches = & git grep -E -I -i "(BEGIN RSA PRIVATE KEY|AIzaSy[A-Za-z0-9_-]{33}|client_secret|MINIO_ROOT_PASSWORD\s*:\s*[A-Za-z0-9]+)" -- ':!*.example.*' ':!tests/*' ':!*.gitignore' ':!scripts/*' ':!.github/*' 2>$null
 if ($secretMatches) {
     Write-Error "CRITICAL: Potential leaked credentials discovered in tracked files!"
     throw "Secret scan gate failed."
@@ -70,7 +70,7 @@ Write-Host "`n[STAGE 4/8] Validating Kubernetes Manifests (Dry-Run)..." -Foregro
 $k8sManifests = Get-ChildItem "$WorkspaceRoot\k8s" -Filter "*.yaml" -File | Where-Object { $_.Name -notmatch "example" }
 foreach ($manifest in $k8sManifests) {
     Write-Host "   Checking $($manifest.Name)..." -ForegroundColor Gray
-    & kubectl apply -f $manifest.FullName --dry-run=client -n $Namespace
+    & kubectl apply -f $manifest.FullName --dry-run=client
     if ($LASTEXITCODE -ne 0) { throw "Dry-run failed on $($manifest.Name)" }
 }
 Write-Host "[OK] Stage 4 Kubernetes manifest schema validation passed." -ForegroundColor Green

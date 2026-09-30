@@ -48,8 +48,7 @@ if ($backendHealth -notmatch '"status"\s*:\s*"healthy"') {
 Write-Host "   [Health API] PASS: $backendHealth" -ForegroundColor Green
 
 Write-Host "`n[+] 5. Verifying live model inference across restored deployment..." -ForegroundColor Cyan
-$testPayload = '{"features": [[1.0, 2.0]]}'
-$predResult = & kubectl exec -n $Namespace deploy/modelforge-backend -- python -c "import urllib.request, json; req = urllib.request.Request('http://model-server:8000/predict', data=b'$testPayload', headers={'Content-Type': 'application/json'}); print(json.loads(urllib.request.urlopen(req, timeout=5).read().decode()).get('predictions', []))" 2>$null
+$predResult = & kubectl exec -n $Namespace deploy/modelforge-backend -- python -c "import urllib.request, json; data = json.dumps({'features': [1.0, 2.0]}).encode(); req = urllib.request.Request('http://model-server:8000/predict', data=data, headers={'Content-Type': 'application/json'}); print(json.loads(urllib.request.urlopen(req, timeout=5).read().decode()).get('predictions', []))" 2>$null
 if ($predResult -notmatch "\[[0-9]+\]") {
     throw "Post-rollback inference test failed: $predResult"
 }

@@ -28,7 +28,7 @@ spec:
         - name: frontend
           securityContext:
             allowPrivilegeEscalation: false
-          image: 172.18.0.9:5000/modelforge/frontend:v1
+          image: localhost:5000/modelforge/frontend:1.5.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
