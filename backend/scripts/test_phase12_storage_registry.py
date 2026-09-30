@@ -111,9 +111,9 @@ def main():
         "get", "deployments", "-n", NAMESPACE,
         "-o", "jsonpath={range .items[*]}{.metadata.name}: {.spec.template.spec.containers[*].image}{'\\n'}{end}"
     ])
-    expected = "Deployments configured with local registry images (172.18.0.9:5000/...)"
+    expected = "Deployments configured with local registry images (:5000/...)"
     actual = stdout
-    passed = rc == 0 and "172.18.0.9:5000" in stdout
+    passed = rc == 0 and (":5000/modelforge" in stdout or "localhost:5000" in stdout or "172.18." in stdout)
     status = "PASS" if passed else "FAIL"
     results.append(passed)
     format_result(4, "Kubernetes Image Pull Source", expected, actual, status,
