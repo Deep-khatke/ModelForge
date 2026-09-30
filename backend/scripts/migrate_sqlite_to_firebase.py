@@ -119,6 +119,9 @@ def migrate(
     # 2. Connect to SQLite
     connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
     engine = create_engine(db_url, connect_args=connect_args)
+    from app.database import Base
+    import app.models  # noqa: F401
+    Base.metadata.create_all(bind=engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     session = SessionLocal()
 

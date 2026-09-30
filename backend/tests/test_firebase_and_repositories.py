@@ -52,12 +52,27 @@ class DummyModel:
         return [1] * len(X)
 
 
-@pytest.fixture(autouse=True)
-def setup_test_tables():
-    """Ensure database schema is created and migrated for repository tests."""
-    from app.database import init_db
-    init_db()
-    yield
+@pytest.fixture
+def db_session(tmp_path):
+    """Isolated SQLite session with schema created for repository tests."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.database import Base
+    import app.models  # noqa: F401
+
+    db_path = tmp_path / "repo_test.db"
+    test_engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(bind=test_engine)
+    TestingSession = sessionmaker(bind=test_engine, autocommit=False, autoflush=False)
+    session = TestingSession()
+    try:
+        yield session
+    finally:
+        session.close()
+        test_engine.dispose()
 
 
 # --- 1. Artifact Storage Abstraction Tests -----------------------------------
@@ -93,175 +108,160 @@ def test_local_artifact_store(tmp_path):
 
 # --- 2. Repository Abstraction Tests (SQLite) --------------------------------
 
-def test_sqlite_model_repository():
-    db = SessionLocal()
-    try:
-        repo = SQLiteModelRepository(db)
-        model_name = "test_fraud_model"
-        # Cleanup if exists
-        existing = repo.get_model_by_name(model_name)
-        if existing:
-            repo.delete_model(existing.id)
+def test_sqlite_model_repository(db_session):
+    repo = SQLiteModelRepository(db_session)
+    model_name = "test_fraud_model"
+    # Cleanup if exists
+    existing = repo.get_model_by_name(model_name)
+    if existing:
+        repo.delete_model(existing.id)
 
-        model = repo.create_model(model_name)
-        assert model.id is not None
-        assert model.name == model_name
+    model = repo.create_model(model_name)
+    assert model.id is not None
+    assert model.name == model_name
 
-        version = repo.create_version(
-            model_id=model.id,
-            version="v1",
-            framework="sklearn",
-            model_type="LogisticRegression",
-            supports_proba=True,
-            original_filename="model.joblib",
-            stored_filename="model.joblib",
-            file_path="/tmp/model.joblib",
-            file_size_bytes=1024,
-            is_active=True,
-        )
-        assert version.version == "v1"
+    version = repo.create_version(
+        model_id=model.id,
+        version="v1",
+        framework="sklearn",
+        model_type="LogisticRegression",
+        supports_proba=True,
+        original_filename="model.joblib",
+        stored_filename="model.joblib",
+        file_path="/tmp/model.joblib",
+        file_size_bytes=1024,
+        is_active=True,
+    )
+    assert version.version == "v1"
 
-        models = repo.list_models()
-        assert any(m.id == model.id for m in models)
+    models = repo.list_models()
+    assert any(m.id == model.id for m in models)
 
-        fetched = repo.get_model(model.id)
-        assert fetched is not None
-        assert len(fetched.versions) == 1
-        assert fetched.active_version.version == "v1"
+    fetched = repo.get_model(model.id)
+    assert fetched is not None
+    assert len(fetched.versions) == 1
+    assert fetched.active_version.version == "v1"
 
-        v_fetched = repo.get_version(model.id, "v1")
-        assert v_fetched is not None
-        assert v_fetched.id == version.id
+    v_fetched = repo.get_version(model.id, "v1")
+    assert v_fetched is not None
+    assert v_fetched.id == version.id
 
-        # Clean up
-        repo.delete_model(model.id)
-        assert repo.get_model(model.id) is None
-    finally:
-        db.close()
+    # Clean up
+    repo.delete_model(model.id)
+    assert repo.get_model(model.id) is None
 
 
-def test_sqlite_deployment_repository():
-    db = SessionLocal()
-    try:
-        m_repo = SQLiteModelRepository(db)
-        d_repo = SQLiteDeploymentRepository(db)
+def test_sqlite_deployment_repository(db_session):
+    m_repo = SQLiteModelRepository(db_session)
+    d_repo = SQLiteDeploymentRepository(db_session)
 
-        m = m_repo.create_model("deploy_test_model")
-        v = m_repo.create_version(
-            model_id=m.id,
-            version="v1",
-            framework="sklearn",
-            model_type="LogisticRegression",
-            supports_proba=False,
-            original_filename="m.joblib",
-            stored_filename="m.joblib",
-            file_path="/tmp/m.joblib",
-            file_size_bytes=512,
-        )
+    m = m_repo.create_model("deploy_test_model")
+    v = m_repo.create_version(
+        model_id=m.id,
+        version="v1",
+        framework="sklearn",
+        model_type="LogisticRegression",
+        supports_proba=False,
+        original_filename="m.joblib",
+        stored_filename="m.joblib",
+        file_path="/tmp/m.joblib",
+        file_size_bytes=512,
+    )
 
-        d = d_repo.create_deployment(
-            model_id=m.id,
-            model_version_id=v.id,
-            version_label="v1",
-            replicas=2,
-            endpoint="/api/v1/models/deploy_test_model/predict",
-            status="running",
-        )
-        assert d.id is not None
-        assert d.replicas == 2
+    d = d_repo.create_deployment(
+        model_id=m.id,
+        model_version_id=v.id,
+        version_label="v1",
+        replicas=2,
+        endpoint="/api/v1/models/deploy_test_model/predict",
+        status="running",
+    )
+    assert d.id is not None
+    assert d.replicas == 2
 
-        d_repo.update_deployment(d.id, replicas=3, scaling_status="scaling_up")
-        updated = d_repo.get_deployment(d.id)
-        assert updated.replicas == 3
-        assert updated.scaling_status == "scaling_up"
+    d_repo.update_deployment(d.id, replicas=3, scaling_status="scaling_up")
+    updated = d_repo.get_deployment(d.id)
+    assert updated.replicas == 3
+    assert updated.scaling_status == "scaling_up"
 
-        cfg = d_repo.save_autoscaling_config(
-            d.id,
-            enabled=True,
-            min_replicas=1,
-            max_replicas=4,
-            target_latency_ms=150.0,
-        )
-        assert cfg.enabled is True
-        assert cfg.target_latency_ms == 150.0
+    cfg = d_repo.save_autoscaling_config(
+        d.id,
+        enabled=True,
+        min_replicas=1,
+        max_replicas=4,
+        target_latency_ms=150.0,
+    )
+    assert cfg.enabled is True
+    assert cfg.target_latency_ms == 150.0
 
-        fetched_cfg = d_repo.get_autoscaling_config(d.id)
-        assert fetched_cfg is not None
-        assert fetched_cfg.max_replicas == 4
+    fetched_cfg = d_repo.get_autoscaling_config(d.id)
+    assert fetched_cfg is not None
+    assert fetched_cfg.max_replicas == 4
 
-        # Cleanup
-        d_repo.delete_deployment(d.id)
-        m_repo.delete_model(m.id)
-    finally:
-        db.close()
+    # Cleanup
+    d_repo.delete_deployment(d.id)
+    m_repo.delete_model(m.id)
 
 
-def test_sqlite_user_and_audit_repository():
-    db = SessionLocal()
-    try:
-        u_repo = SQLiteUserRepository(db)
-        a_repo = SQLiteAuditRepository(db)
+def test_sqlite_user_and_audit_repository(db_session):
+    u_repo = SQLiteUserRepository(db_session)
+    a_repo = SQLiteAuditRepository(db_session)
 
-        test_email = "tester_repo@modelforge.local"
-        existing = u_repo.get_user_by_email(test_email)
-        if existing:
-            u_repo.delete_user(existing.id)
+    test_email = "tester_repo@modelforge.local"
+    existing = u_repo.get_user_by_email(test_email)
+    if existing:
+        u_repo.delete_user(existing.id)
 
-        user = u_repo.create_user(
-            email=test_email,
-            display_name="Tester Repo",
-            role="OPERATOR",
-        )
-        assert user.id is not None
-        assert user.role == "OPERATOR"
+    user = u_repo.create_user(
+        email=test_email,
+        display_name="Tester Repo",
+        role="OPERATOR",
+    )
+    assert user.id is not None
+    assert user.role == "OPERATOR"
 
-        u_repo.update_user(user.id, role="ADMIN")
-        refreshed = u_repo.get_user_by_id(user.id)
-        assert refreshed.role == "ADMIN"
+    u_repo.update_user(user.id, role="ADMIN")
+    refreshed = u_repo.get_user_by_id(user.id)
+    assert refreshed.role == "ADMIN"
 
-        event = a_repo.log_event(
-            action="MODEL_TEST_ACTION",
-            resource_type="model",
-            resource_id="mod_123",
-            user_id=user.id,
-            user_email=user.email,
-            details={"key": "value", "password": "should_be_redacted"},
-            success=True,
-        )
-        assert event is not None
-        assert "[REDACTED]" in event.details
+    event = a_repo.log_event(
+        action="MODEL_TEST_ACTION",
+        resource_type="model",
+        resource_id="mod_123",
+        user_id=user.id,
+        user_email=user.email,
+        details={"key": "value", "password": "should_be_redacted"},
+        success=True,
+    )
+    assert event is not None
+    assert "[REDACTED]" in event.details
 
-        events, total = a_repo.query_events(user_id=user.id, limit=10)
-        assert total >= 1
-        assert any(e.action == "MODEL_TEST_ACTION" for e in events)
+    events, total = a_repo.query_events(user_id=user.id, limit=10)
+    assert total >= 1
+    assert any(e.action == "MODEL_TEST_ACTION" for e in events)
 
-        csv_data = a_repo.export_csv(user_id=user.id)
-        assert "Event ID" in csv_data
-        assert "MODEL_TEST_ACTION" in csv_data
+    csv_data = a_repo.export_csv(user_id=user.id)
+    assert "Event ID" in csv_data
+    assert "MODEL_TEST_ACTION" in csv_data
 
-        # Cleanup
-        u_repo.delete_user(user.id)
-    finally:
-        db.close()
+    # Cleanup
+    u_repo.delete_user(user.id)
 
 
 # --- 3. Repository Factory & Defaults ----------------------------------------
 
-def test_repository_factory_defaults():
-    db = SessionLocal()
-    try:
-        assert is_firestore_enabled() is False
-        m_repo = get_model_repository(db)
-        d_repo = get_deployment_repository(db)
-        u_repo = get_user_repository(db)
-        a_repo = get_audit_repository(db)
+def test_repository_factory_defaults(monkeypatch, db_session):
+    monkeypatch.setattr(settings, "database_backend", "sqlite")
+    assert is_firestore_enabled() is False
+    m_repo = get_model_repository(db_session)
+    d_repo = get_deployment_repository(db_session)
+    u_repo = get_user_repository(db_session)
+    a_repo = get_audit_repository(db_session)
 
-        assert isinstance(m_repo, SQLiteModelRepository)
-        assert isinstance(d_repo, SQLiteDeploymentRepository)
-        assert isinstance(u_repo, SQLiteUserRepository)
-        assert isinstance(a_repo, SQLiteAuditRepository)
-    finally:
-        db.close()
+    assert isinstance(m_repo, SQLiteModelRepository)
+    assert isinstance(d_repo, SQLiteDeploymentRepository)
+    assert isinstance(u_repo, SQLiteUserRepository)
+    assert isinstance(a_repo, SQLiteAuditRepository)
 
 
 # --- 4. Firebase Diagnostics & Error Handling --------------------------------
@@ -284,31 +284,58 @@ def test_verify_firebase_token_without_sdk():
     assert exc_info.value.status_code in (503, 401)
 
 
-def test_migration_dry_run():
+def test_migration_dry_run(tmp_path):
     # Dry run should succeed with code 0 without contacting Firebase
-    exit_code = migrate(dry_run=True)
+    from sqlalchemy import create_engine
+    from app.database import Base
+    import app.models  # noqa: F401
+
+    db_path = tmp_path / "migration_test.db"
+    db_url = f"sqlite:///{db_path}"
+    test_engine = create_engine(db_url, connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=test_engine)
+    test_engine.dispose()
+
+    exit_code = migrate(sqlite_url=db_url, dry_run=True)
     assert exit_code == 0
 
 
 if __name__ == "__main__":
     import tempfile
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
     print("Running setup_test_tables...")
     Base.metadata.create_all(bind=engine)
     print("Testing local artifact store...")
     with tempfile.TemporaryDirectory() as tmp:
         test_local_artifact_store(Path(tmp))
-    print("Testing SQLite model repository...")
-    test_sqlite_model_repository()
-    print("Testing SQLite deployment repository...")
-    test_sqlite_deployment_repository()
-    print("Testing SQLite user and audit repository...")
-    test_sqlite_user_and_audit_repository()
-    print("Testing repository factory defaults...")
-    test_repository_factory_defaults()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        p = Path(tmp) / "manual_test.db"
+        t_engine = create_engine(f"sqlite:///{p}", connect_args={"check_same_thread": False})
+        Base.metadata.create_all(bind=t_engine)
+        Session = sessionmaker(bind=t_engine, autocommit=False, autoflush=False)
+        sess = Session()
+        try:
+            print("Testing SQLite model repository...")
+            test_sqlite_model_repository(sess)
+            print("Testing SQLite deployment repository...")
+            test_sqlite_deployment_repository(sess)
+            print("Testing SQLite user and audit repository...")
+            test_sqlite_user_and_audit_repository(sess)
+            print("Testing repository factory defaults...")
+            settings.database_backend = "sqlite"
+            mp = pytest.MonkeyPatch()
+            test_repository_factory_defaults(mp, sess)
+        finally:
+            sess.close()
+            t_engine.dispose()
+
     print("Testing Firebase diagnostics endpoint...")
     test_firebase_diagnostics_endpoint()
     print("Testing verify_firebase_token_without_sdk...")
     test_verify_firebase_token_without_sdk()
     print("Testing migration dry-run...")
-    test_migration_dry_run()
+    with tempfile.TemporaryDirectory() as tmp:
+        test_migration_dry_run(Path(tmp))
     print("\n>>> ALL PHASE 8.5 UNIT & INTEGRATION TESTS PASSED SUCCESSFULLY! <<<")
