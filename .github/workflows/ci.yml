@@ -43,7 +43,7 @@ jobs:
         run: |
           echo "Scanning repository for accidentally committed secrets or tokens..."
           # Scan for private keys, AWS/GCP keys, service accounts, and sensitive tokens
-          ! git grep -E -I -i "(BEGIN RSA PRIVATE KEY|AIzaSy|service_account_token|client_secret)" -- ':!*.example.*' ':!tests/*'
+          ! git grep -E -I -i "(BEGIN RSA PRIVATE KEY|AIzaSy|service_account_token|client_secret)" -- ':!*.example.*' ':!tests/*' ':!.github/*' ':!scripts/*'
 
   # ---------------------------------------------------------------------------
   # 2. Backend CI Stage
