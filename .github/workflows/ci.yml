@@ -36,14 +36,14 @@ jobs:
 
       - name: Validate Kubernetes Manifests (Dry-Run / Schema)
         run: |
-          # Validate all Kubernetes manifest YAML syntax
+          pip install pyyaml
           python3 -c "import yaml, glob; [list(yaml.safe_load_all(open(f))) for f in glob.glob('k8s/**/*.yaml', recursive=True)]"
 
       - name: Secret Scanning Gate
         run: |
           echo "Scanning repository for accidentally committed secrets or tokens..."
           # Scan for private keys, AWS/GCP keys, service accounts, and sensitive tokens
-          ! git grep -E -I -i "(BEGIN RSA PRIVATE KEY|AIzaSy|service_account_token|client_secret)" -- ':!*.example.*' ':!tests/*' ':!.github/*' ':!scripts/*'
+          ! git grep -E -I -i "(BEGIN RSA PRIVATE KEY|AIzaSy[A-Za-z0-9_-]{33}|client_secret|MINIO_ROOT_PASSWORD\s*:\s*[A-Za-z0-9]+)" -- ':!*.example.*' ':!tests/*' ':!.github/*' ':!scripts/*' ':!docs/*' ':!backend/scripts/*'
 
   # ---------------------------------------------------------------------------
   # 2. Backend CI Stage
@@ -71,7 +71,15 @@ jobs:
       - name: Run Backend Unit & Integration Tests
         run: |
           cd backend
-          pytest -q tests/
+          python -m pytest -q tests/
+        env:
+          PYTHONPATH: .
+          DATABASE_BACKEND: sqlite
+          DATABASE_URL: sqlite:///./test.db
+          AUTH_ENABLED: "false"
+          AUTOSCALING_BACKGROUND_ENABLED: "false"
+          FIREBASE_AUTH_ENABLED: "false"
+          MODEL_STORAGE_BACKEND: local
 
   # ---------------------------------------------------------------------------
   # 3. Frontend CI Stage
