@@ -1,6 +1,10 @@
+# Python Caches
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+
 # Backend
-backend/__pycache__/
-backend/**/__pycache__/
 backend/.venv/
 backend/venv/
 backend/.env
